@@ -55,7 +55,7 @@ install() {
     local expected_checksum
     expected_checksum=$(_sha256 "${bin_path}" | awk '{print $1}')
     local checksum
-    checksum="$(curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS" | grep "terragrunt_${platform}_${arch}" | awk '{print $1}')"
+    checksum="$(curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS" | grep "terragrunt_${platform}_${arch}$" | awk '{print $1}')"
 
     if [[ "${expected_checksum}" != "${checksum}" ]]; then
       echo "Checksum for terragrunt did not match"
