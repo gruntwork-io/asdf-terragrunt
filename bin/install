@@ -51,12 +51,23 @@ install() {
     exit 1
   fi
 
+  _install_tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$_install_tmp_dir"' EXIT
+  local sums_file="${_install_tmp_dir}/SHA256SUMS"
+
+  local sums_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS"
+  if ! curl -sL -o "${sums_file}" "${sums_url}"; then
+    echo "Warning: Failed to download SHA256SUMS"
+    rm -f "${bin_path}"
+    exit 1
+  fi
+
   # Checksum verification
   if [[ "${ASDF_TERRAGRUNT_SKIP_CHECKSUM:-"false"}" != "true" ]]; then
     local expected_checksum
     expected_checksum=$(_sha256 "${bin_path}" | awk '{print $1}')
     local checksum
-    checksum="$(curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS" | grep "terragrunt_${platform}_${arch}$" | awk '{print $1}')"
+    checksum="$(grep "terragrunt_${platform}_${arch}$" "${sums_file}" | awk '{print $1}')"
 
     if [[ "${expected_checksum}" != "${checksum}" ]]; then
       echo "Checksum for terragrunt did not match"
@@ -82,7 +93,7 @@ install() {
     return
   fi
 
-  if ! verify_signature "${version}"; then
+  if ! verify_signature "${version}" "${sums_file}"; then
     echo "Signature verification failed. Set ASDF_TERRAGRUNT_SKIP_SIGNATURE=true to skip."
     rm -f "${bin_path}"
     exit 1
@@ -116,8 +127,8 @@ _version_gte() {
     # Manual version comparison for systems without sort -V (e.g., macOS)
     local i
 
-    IFS='.' read -ra v1 <<< "$version"
-    IFS='.' read -ra v2 <<< "$min_version"
+    IFS='.' read -ra v1 <<<"$version"
+    IFS='.' read -ra v2 <<<"$min_version"
 
     for ((i = 0; i < ${#v2[@]}; i++)); do
       local n1=${v1[i]:-0}
@@ -167,20 +178,12 @@ _import_gpg_key() {
 
 _verify_gpg_signature() {
   local version=$1
-  local tmp_dir=$2
+  local sums_file=$2
 
-  local sums_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS"
   local sig_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS.gpgsig"
+  local sig_file="${sums_file}.gpgsig"
 
-  local sums_file="${tmp_dir}/SHA256SUMS"
-  local sig_file="${tmp_dir}/SHA256SUMS.gpgsig"
-
-  echo "Downloading signature files for GPG verification..."
-
-  if ! curl -sL -o "${sums_file}" "${sums_url}"; then
-    echo "Warning: Failed to download SHA256SUMS"
-    return 1
-  fi
+  echo "Downloading GPG signature file..."
 
   if ! curl -sL -o "${sig_file}" "${sig_url}"; then
     echo "Warning: Failed to download SHA256SUMS.gpgsig"
@@ -203,22 +206,15 @@ _verify_gpg_signature() {
 
 _verify_cosign_signature() {
   local version=$1
-  local tmp_dir=$2
+  local sums_file=$2
 
-  local sums_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS"
   local sig_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS.sig"
   local cert_url="https://github.com/gruntwork-io/terragrunt/releases/download/v${version}/SHA256SUMS.pem"
 
-  local sums_file="${tmp_dir}/SHA256SUMS"
-  local sig_file="${tmp_dir}/SHA256SUMS.sig"
-  local cert_file="${tmp_dir}/SHA256SUMS.pem"
+  local sig_file="${sums_file}.sig"
+  local cert_file="${sums_file}.pem"
 
-  echo "Downloading signature files for Cosign verification..."
-
-  if ! curl -sL -o "${sums_file}" "${sums_url}"; then
-    echo "Warning: Failed to download SHA256SUMS"
-    return 1
-  fi
+  echo "Downloading Cosign signature files..."
 
   if ! curl -sL -o "${sig_file}" "${sig_url}"; then
     echo "Warning: Failed to download SHA256SUMS.sig"
@@ -246,11 +242,7 @@ _verify_cosign_signature() {
 
 verify_signature() {
   local version=$1
-
-  _verify_signature_tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$_verify_signature_tmp_dir"' EXIT
-
-  local tmp_dir="${_verify_signature_tmp_dir}"
+  local sums_file=$2
 
   local method="${ASDF_TERRAGRUNT_SIGNATURE_METHOD:-auto}"
 
@@ -260,7 +252,7 @@ verify_signature() {
       echo "Error: GPG verification requested but gpg is not installed"
       return 1
     fi
-    _verify_gpg_signature "${version}" "${tmp_dir}"
+    _verify_gpg_signature "${version}" "${sums_file}"
     return $?
     ;;
   cosign)
@@ -268,20 +260,20 @@ verify_signature() {
       echo "Error: Cosign verification requested but cosign is not installed"
       return 1
     fi
-    _verify_cosign_signature "${version}" "${tmp_dir}"
+    _verify_cosign_signature "${version}" "${sums_file}"
     return $?
     ;;
   auto)
     # Try GPG first, then Cosign
     if _gpg_available; then
       echo "Using GPG for signature verification"
-      _verify_gpg_signature "${version}" "${tmp_dir}"
+      _verify_gpg_signature "${version}" "${sums_file}"
       return $?
     fi
 
     if _cosign_available; then
       echo "Using Cosign for signature verification"
-      _verify_cosign_signature "${version}" "${tmp_dir}"
+      _verify_cosign_signature "${version}" "${sums_file}"
       return $?
     fi
 
