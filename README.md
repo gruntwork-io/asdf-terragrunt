@@ -8,7 +8,7 @@ Check out the [asdf](https://github.com/asdf-vm/asdf) readme for instructions.
 ### Install
 
 ```
-asdf plugin-add terragrunt https://github.com/ohmer/asdf-terragrunt
+asdf plugin add terragrunt https://github.com/ohmer/asdf-terragrunt
 ```
 
 ### Environment Variable Options
